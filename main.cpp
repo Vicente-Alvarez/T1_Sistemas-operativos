@@ -8,7 +8,7 @@ using namespace std;
 #include <sys/wait.h>
 #include <cstring>
 #include <string>
-
+#include <csignal>
 
 #define MAX_TAREAS 10005 //para prueba de estres
 #define MAX_DEPS 50   // cant max de dependencias por tarea
@@ -124,6 +124,20 @@ return true; // si todas las depen ya terminaron
 
 
 
+bool tiene_dependencia_fallida(int idx){
+for(int i=0; i< plan[idx].cant_dependencias; i++){
+int dep_id = plan[idx].dependencias[i]; 
+int dep_idx= buscar_indice_por_id(dep_id);
+
+if(dep_idx !=-1 && plan[dep_idx].estado == CANCELADO){
+return true; } // aca detecta si una depen fallo o se cancelo
+}
+return false;
+}
+
+
+
+
 
 void ejecutar_tarea(int idx){
 if(pipe(plan[idx].pipe_fd) == -1){
@@ -135,12 +149,14 @@ pid_t pid=fork();
 if(pid <0){
 perror("Error"); 
 exit(1); 
-} else if( pid==0){ //hijo
+}
+ else if( pid==0){ //hijo
+signal(SIGINT, SIG_DFL);
 close(plan[idx].pipe_fd[0]); // aca el hijo no lee pipe, solo escribe
 usleep(plan[idx].duracion_ms * 1000);  // simula duracion en mili
 
 string mensaje = "OK:" + to_string(plan[idx].id);
-write(plan[idx].pipe_fd[1], mensaje.c_str(), mensaje.length());
+write(plan[idx].pipe_fd[1], mensaje.c_str(), mensaje.length()+1);
 
 close(plan[idx].pipe_fd[1]);
         exit(0); // el hijo termino bien
@@ -150,7 +166,7 @@ close(plan[idx].pipe_fd[1]);
         plan[idx].estado = EJECUCION;
         procesos_activos++;
 
-cout << "[INICIO] tarea" << plan[idx].id << " (" << plan[idx].nombre 
+cout << "INICIO,  tarea" << plan[idx].id << " (" << plan[idx].nombre 
              << ") en PID " << pid << endl;
 }}
 
@@ -175,7 +191,7 @@ close(plan[i].pipe_fd[0]);
 
 if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
 plan[i].estado = COMPLETADO;
-cout << "[COMPLETADO] Tarea " << plan[i].id << " (" << plan[i].nombre << "). Pipe leido: " << buffer << endl;
+cout << "COMPLETADO, Tarea " << plan[i].id << " (" << plan[i].nombre << "). Pipe leido: " << buffer << endl;
 } else {
 plan[i].estado = CANCELADO;
 }
@@ -187,6 +203,20 @@ break;
 
 
 
+void manejador_sigint(int sig) {
+(void)sig; //esto evita el warning de variable no usada
+cout << "\n SIGINT,  Interrupcion detectada por comando ctrl + c , cancelando procesos activos " <<endl; 
+
+for (int i=0; i < total_tareas; i++){
+if (plan[i].estado == EJECUCION && plan[i].pid > 0){
+cout << " Cancelando tarea " << plan[i].id <<" ("<< plan[i].nombre <<") con PID: " << plan[i].pid << endl;
+
+kill (plan[i].pid,SIGTERM); // aqui cierra el proceso hijo
+plan[i].estado=CANCELADO; 
+}
+}
+exit(0); 
+}
 
 
 
@@ -199,6 +229,16 @@ cout<<"Uso: "<< argv[0] << "<plan.txt> <K_concurrencia>" <<endl;
 return 1; 
 }
 
+struct sigaction sa;  // registramos el comando ctrl + c 
+sa.sa_handler = manejador_sigint; 
+sigemptyset(&sa.sa_mask);
+sa.sa_flags = 0;
+sigaction(SIGINT, &sa, NULL);
+
+
+
+
+
 srand(time(NULL));
 limite_K =atoi(argv[2]); // guardamos k  ingresado 
 
@@ -210,16 +250,51 @@ leer_plan(argv[1]);
 cout<<"Carga y parseo del DAG exitoso "<<endl; 
 cout<<"Total tareas cargadas: " <<total_tareas<<", limite k: "<<limite_K<<endl;
 
-for(int i=0; i< total_tareas; i++){
-cout << "[ID " << plan[i].id << "] " << plan[i].nombre << ", Duracion: " << plan[i].duracion_ms << " ms"
-                  << ", Depende de (" << plan[i].cant_dependencias << " tareas): ";
 
 
-for (int j=0; j < plan[i].cant_dependencias; j++) {
-            cout << plan[i].dependencias[j] << " ";
+
+
+cout << "\n Iniciando simulacion del planificadro dieciochero \n"<< endl; 
+int completa_cancelada=0; 
+
+while(completa_cancelada < total_tareas){
+bool se_lanzo_alguna= false; 
+
+for(int i=0; i<total_tareas; i++){
+if(plan[i].estado==PENDIENTE){ // aislamiento de errores,por si una depen falla
+
+if(tiene_dependencia_fallida(i)){ 
+plan[i].estado=CANCELADO;
+completa_cancelada++;  
+se_lanzo_alguna=true; 
+
+cout << "CANCELADO, Tarea " << plan[i].id << " (" << plan[i].nombre<< ") omitida por fallo en sus dependencias." << endl;
+continue; }
+
+if(dependencias_listas(i) && procesos_activos < limite_K){ //si las depen estan listas y no pasa k, ejecutamos
+ejecutar_tarea(i); 
+se_lanzo_alguna=true; }
+}
+}
+
+if(procesos_activos >0){
+esperar_proceso(); 
+
+int contador=0; 
+for(int i=0; i < total_tareas;i++){
+if(plan[i].estado==COMPLETADO || plan[i].estado== CANCELADO){
+contador ++; }
+}
+
+completa_cancelada=contador; 
+}else if( !se_lanzo_alguna && completa_cancelada < total_tareas){
+cout << "\n ERROR, Se detecto un ciclo o interbloqueo en el DAG." << endl;
+            break;
         }
-        cout <<endl;
     }
 
+cout << "\n  Simulacion finalizada correctamente " << endl;
+
     return 0;
+
 }
