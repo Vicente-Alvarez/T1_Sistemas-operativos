@@ -9,6 +9,7 @@ using namespace std;
 #include <cstring>
 #include <string>
 #include <csignal>
+#include <cerrno>
 
 #define MAX_TAREAS 10005 //para prueba de estres
 #define MAX_DEPS 50   // cant max de dependencias por tarea
@@ -41,6 +42,17 @@ Tarea plan[MAX_TAREAS];
 int total_tareas= 0; 
 int limite_K=1; //limite de concurrencia 
 
+// mapa para optimizar la busqueda de id a O(1)
+int mapa_id_a_idx[MAX_TAREAS];
+
+void inicializar_mapa() {
+for (int i = 0; i < MAX_TAREAS; i++) {
+mapa_id_a_idx[i] = -1;
+}
+}
+
+
+
 
 
 
@@ -59,26 +71,26 @@ if(strlen(linea) <= 1 || linea [0] == '#') continue;  // aca ignoramos lineas va
 Tarea t; 
 memset(&t, 0, sizeof(Tarea)); // limpiamos memoria de struc 
 
-t.estado= PENDIENTE;  //aqui todas las tareas inician en pendiente 
+t.estado= PENDIENTE;   
 
-char *token= strtok(linea, ":"); // 1 extraemos id : 
+char *token= strtok(linea, ":"); // extraemos id  
 if(!token)continue; 
-t.id= atoi(token); //con atoi convertimos el texto a un num entero 
+t.id= atoi(token);  
 
-token= strtok(NULL, ":"); // 2 extraemos el nombre 
+token= strtok(NULL, ":"); //  extraemos el nombre 
 if(!token) continue; 
 sscanf(token, " %s", t.nombre);
 
-token= strtok(NULL, ":");// 3 extraemos duracion en milisegundos
+token= strtok(NULL, ":");//  extraemos duracion en milisegundos
 if(!token)continue; 
 t.duracion_ms= atoi(token); 
 
-if(t.duracion_ms <=0){ //por si no tiene un rango asignado, se asigna aleatorio
+if(t.duracion_ms <=0){ 
 t.duracion_ms = 100 + (rand() % 4901); // rango de 100 a 5000
 }
 
 
-token= strtok(NULL, ":");  //4 extraemos lista de dependencias si existen 
+token= strtok(NULL, ":");  // extraemos lista de dependencias si existen 
 if(token){
 char *dep= strtok (token, ", \t\n"); 
 while(dep!=NULL){
@@ -90,19 +102,23 @@ dep= strtok(NULL,  ", \t\n"); // avanzamos sgnt dependencia
 }
 }
 
+if (t.id < MAX_TAREAS) {
+mapa_id_a_idx[t.id] = total_tareas;
+}
+
 plan[total_tareas++] = t; // guardamos tarea procesada en arreglo plan
 }
-fclose(f); // cerramos el archivo 
+fclose(f); 
 }
 
 
-int buscar_indice_por_id(int id) {
-for (int i = 0; i < total_tareas; i++) {
-if (plan[i].id == id) return i;
+
+int buscar_indice_por_id(int id) { //buscamos indice
+if (id >= 0 && id < MAX_TAREAS) {
+return mapa_id_a_idx[id];
 }
 return -1;
 }
-
 
 
 
@@ -118,7 +134,6 @@ return false;//aca se dice que falta al menos una dependencia
 }
 return true; // si todas las depen ya terminaron 
 }
-
 
 
 
@@ -166,12 +181,9 @@ close(plan[idx].pipe_fd[1]);
         plan[idx].estado = EJECUCION;
         procesos_activos++;
 
-cout << "INICIO,  tarea" << plan[idx].id << " (" << plan[idx].nombre 
+cout << "INICIO,  tarea " << plan[idx].id << " (" << plan[idx].nombre 
              << ") en PID " << pid << endl;
 }}
-
-
-
 
 
 
@@ -179,6 +191,11 @@ cout << "INICIO,  tarea" << plan[idx].id << " (" << plan[idx].nombre
 void esperar_proceso() {
 int status;
 pid_t pid_finalizado = waitpid(-1, &status, 0);// aca bloquea a padre hasta q  algun hijo termine,  asi no se consume toda la cpu
+
+if (pid_finalizado < 0) {
+if (errno == EINTR) return;
+return;
+}
 
 if (pid_finalizado > 0) {
 procesos_activos--;
@@ -203,6 +220,7 @@ break;
 
 
 
+
 void manejador_sigint(int sig) {
 (void)sig; //esto evita el warning de variable no usada
 cout << "\n SIGINT,  Interrupcion detectada por comando ctrl + c , cancelando procesos activos " <<endl; 
@@ -221,8 +239,7 @@ exit(0);
 
 
 
-
-int main (int  argc, char *argv[]){
+int main (int   argc, char *argv[]){
 
 if( argc < 3){ //para validar argumentos necesarios 
 cout<<"Uso: "<< argv[0] << "<plan.txt> <K_concurrencia>" <<endl; 
@@ -235,10 +252,6 @@ sigemptyset(&sa.sa_mask);
 sa.sa_flags = 0;
 sigaction(SIGINT, &sa, NULL);
 
-
-
-
-
 srand(time(NULL));
 limite_K =atoi(argv[2]); // guardamos k  ingresado 
 
@@ -246,6 +259,7 @@ if(limite_K <=0){
 cout << "El limite k debe ser mayor a 0, no valido " << endl; 
 return 1; }
 
+inicializar_mapa();
 leer_plan(argv[1]);
 cout<<"Carga y parseo del DAG exitoso "<<endl; 
 cout<<"Total tareas cargadas: " <<total_tareas<<", limite k: "<<limite_K<<endl;
