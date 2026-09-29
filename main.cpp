@@ -223,7 +223,7 @@ break;
 
 void manejador_sigint(int sig) {
 (void)sig; //esto evita el warning de variable no usada
-cout << "\n SIGINT,  Interrupcion detectada por comando ctrl + c , cancelando procesos activos " <<endl; 
+cout << "\nDetenido por inspección de la Seremi" << endl;
 
 for (int i=0; i < total_tareas; i++){
 if (plan[i].estado == EJECUCION && plan[i].pid > 0){

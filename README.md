@@ -30,7 +30,7 @@ make
 ```
 Compilación manual:
 ```bash
-g++ -Wall -Wextra -std=c++17 main.cpp -o planificador
+g++ -Wall -Wextra -std=c++17 -lpthread  main.cpp -o planificador
 ```
 
 Ejecución del programa:
